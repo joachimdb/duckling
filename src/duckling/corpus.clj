@@ -22,13 +22,13 @@
   [& args]
   (let [[date token-fields] (vec->date-and-map args)]
     (fn [context token]
-        (when-not
+      (when-not
           (and
-            (= :time (:dim token))
-            (util/hash-match (select-keys token-fields [:direction :precision])
-                             token)
-            (= (-> token :value) date))
-          [date (:value token)]))))
+           (= :time (:dim token))
+           (util/hash-match (select-keys token-fields [:direction :precision])
+                            token)
+           (= (-> token :value) date))
+        [date (:value token)]))))
 
 (defn datetime-interval
   "Creates a datetime interval checker function"
@@ -47,97 +47,125 @@
   "check if the token is a number equal to value.
   If value is integer, it also checks :integer true"
   [value]
-  (fn [_ token] (when-not
-                  (and
-                    (= :number (:dim token))
-                    (or (not (integer? value)) (:integer token))
-                    (= (:value token) value))
-                  [value (:value token)])))
+  (fn [_ token]
+    (when-not
+        (and
+         (= :number (:dim token))
+         (or (not (integer? value)) (:integer token))
+         (= (:value token) value))
+      [{:dim :number
+        :value value} token])))
 
 (defn ordinal
   [value]
-  (fn [_ token] (when-not
-                  (and
-                    (= :ordinal (:dim token))
-                    (= (:value token) value))
-                  [value (:value token)])))
+  (fn [_ token]
+    (when-not
+        (and
+         (= :ordinal (:dim token))
+         (= (:value token) value))
+      [{::dim :ordinal
+        :calue value} token])))
 
 (defn temperature
   "Create a temp condition"
   [value' & [unit' precision']]
   (fn [_ {:keys [dim value unit precision] :as token}]
-    (not (and
-                  (= :temperature dim)
-                  (= value' value)
-                  (= unit' unit)
-                  (= precision' precision)))))
+    (when-not
+        (and
+         (= :temperature dim)
+         (= value' value)
+         (= unit' unit)
+         (= precision' precision))
+      [value' value])))
 
 (defn distance
   "Create a distance condition"
   [value' & [unit' normalized' precision']]
   (fn [_ {:keys [dim value unit normalized precision] :as token}]
-    (not (and
-                  (= :distance dim)
-                  (= value' value)
-                  (= unit' unit)
-                  (= normalized' normalized)
-                  (= precision' precision)))))
+    (when-not
+        (and
+         (= :distance dim)
+         (= value' value)
+         (= unit' unit)
+         (= normalized' normalized)
+         (= precision' precision)))))
 
 (defn money
   "Create a amount-of-money condition"
   [value' & [unit' precision']]
   (fn [_ {:keys [dim value unit precision] :as token}]
-    (not (and
-                  (= :amount-of-money dim)
-                  (= value' value)
-                  (= unit' unit)
-                  (= precision' precision)))))
+    (when-not (and
+               (= :amount-of-money dim)
+               (= value' value)
+               (= unit' unit)
+               (= precision' precision))
+      [{:dim :amount-of-money
+        :value value'
+        :unit unit'
+        :precision precision'} token])))
 
 (defn place
   "Create a place checker"
   [pnl n]
-  (fn [token context] (and
-                        (= :pnl (:dim token))
-                        (= n (:n token))
-                        (= pnl (:pnl token)))))
+  (fn [context token]
+    (when-not (and
+               (= :pnl (:dim token))
+               (= n (:n token))
+               (= pnl (:pnl token)))
+      [{:dim :pnl :n n :pnl pnl} token])))
 
 (defn metric
   "Create a metric checker"
   [cat val]
-  (fn [token context] (and
-                        (= :unit (:dim token))
-                        (= val (:val token))
-                        (= cat (:cat token)))))
+  (fn [context token]
+    (when-not (and
+               (= :unit (:dim token))
+               (= val (:value token))
+               (= cat (:cat token)))
+      [{:dim :unit
+        :value val
+        :cat cat} token])))
 
 (defn quantity
   "Create a quantity condition"
   [value unit & [product]]
-  (fn [token _] (and
-                  (= :quantity (:dim token))
-                  (= value (-> token :value :value))
-                  (= unit (-> token :value :unit))
-                  (= product (-> token :value :product)))))
+  (fn [_ token]
+    (when-not (and
+               (= :quantity (:dim token))
+               (= value (-> token :value :value))
+               (= unit (-> token :value :unit))
+               (= product (-> token :value :product)))
+      [{:dim :quantity
+        :value {:value value :unt unit :product product}} token])))
 
 (defn volume
   "Create a volume condition"
   [value unit & [normalized]]
-  (fn [token _] (and
-                  (= :volume (:dim token))
-                  (= value (-> token :value :value))
-                  (= unit  (-> token :value :unit))
-                  (= normalized (-> token :value :normalized)))))
+  (fn [_ token]
+    (when-not (and
+               (= :volume (:dim token))
+               (= value (-> token :value :value))
+               (= unit  (-> token :value :unit))
+               (= normalized (-> token :value :normalized)))
+      {:fim :volume
+       :value {:value value
+               :unit unit
+               :normalized normalized}})))
 
 
 (defn integer
   "Return a func (duckling pattern) checking that dim=number and integer=true,
   optional range (inclusive), and additional preds"
   [& [min max & predicates]]
-  (fn [token]
-    (and (= :number (:dim token))
-         (:integer token)
-         (or (nil? min) (<= min (:value token)))
-         (or (nil? max) (<= (:value token) max))
-         (every? #(% token) predicates))))
+  (fn [_ token]
+    (when-not
+        (and (= :number (:dim token))
+             (:integer token)
+             (or (nil? min) (<= min (:value token)))
+             (or (nil? max) (<= (:value token) max))
+             (every? #(% token) predicates))
+      [{:dim :number
+        :integer true} token])))
 
 (defrecord CorpusTest [text checks])
 (defn- corpus-test []
@@ -148,6 +176,9 @@
   (update-in c [:checks] conj check))
 
 (defrecord Corpus [context tests])
+
+(defn get-tests-by-text [corpus text]
+    (filter (fn [test] (contains? (:text test) text)) (:tests corpus)))
 
 (comment
 
