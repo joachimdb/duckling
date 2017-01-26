@@ -1,9 +1,10 @@
 (ns duckling.corpus
   (:use     [clojure.tools.logging]
+            [clojure.edn :as edn]
             [plumbing.core :except [millis]])
   (:require [duckling.time.obj :as time]
             [duckling.util :as util]))
-
+;; (remove-ns 'duckling.corpus)
 ; Checker functions return *nil* when OK, or [expected actual] when not OK
 
 (defn- vec->date-and-map
@@ -138,43 +139,71 @@
          (or (nil? max) (<= (:value token) max))
          (every? #(% token) predicates))))
 
+(defrecord CorpusTest [text checks])
+(defn- corpus-test []
+  (CorpusTest. #{} []))
+(defn- add-text [^CorpusTest c text]
+  (update-in c [:text] conj text))
+(defn- add-check [^CorpusTest c check]
+  (update-in c [:checks] conj check))
+
+(defrecord Corpus [context tests])
+
+(comment
+
+  (def t [{:text []}]) ;; init
+  (def t (assoc-in t [(dec (count t)) :text (count (:text (peek t)))] (count (:text (first t)))))
+
+  (update-in ())
+
+  (update-in [0 1 2] [0] #(+ 5 %))
+  (update-in [0 1 2] [1] #(+ 5 %))
+  )
+
 (defn corpus
   "Parse corpus" ;; TODO should be able to load several files, like rules
   [forms]
-  (-> (fn [state [head & more :as forms] context tests]
+  (-> (fn [state [head & more :as forms] test context tests]
+        ;; (println state head test (count tests))
         (if head
           (case state
             :init (cond (map? head) (recur :test-strings more
-                                      head
-                                      (conj tests {:text [], :checks []}))
-                    :else (throw (Exception. (str "Invalid form at init state. A map is expected for context:" (prn-str head)))))
+                                           (corpus-test)
+                                           head
+                                           tests)
+                        :else (throw (Exception. (str "Invalid form at init state. A map is expected for context:" (prn-str head)))))
 
             :test-strings (cond (string? head) (recur :test-strings more
-                                                 context
-                                                 (assoc-in tests
-                                                   [(dec (count tests)) :text (count (:text (peek tests)))]
-                                                   head))
-                            (fn? head) (recur :test-checks forms
-                                         context
-                                         tests)
-                            :else (throw (Exception. (str "Invalid form at test-strings state: " (prn-str head)))))
+                                                      (add-text test head)
+                                                      context
+                                                      tests)
+                                (fn? head) (recur :test-checks forms
+                                                  test
+                                                  context
+                                                  tests)
+                                :else (throw (Exception. (str "Invalid form at test-strings state: " (prn-str head)))))
 
             :test-checks (cond (fn? head) (recur :test-checks more
-                                            context
-                                            (assoc-in tests
-                                              [(dec (count tests)) :checks (count (:checks (peek tests)))]
-                                              head))
-                           (string? head) (recur :test-strings forms
-                                            context
-                                            (conj tests {:text [], :checks []}))
-                           :else (throw (Exception. (str "Invalid form at test-checks stats:" (prn-str head))))))
-          {:context context, :tests tests}))
-    (apply [:init forms [] []])))
+                                                 (add-check test head)
+                                                 context
+                                                 tests)
+                               (string? head) (recur :test-strings forms
+                                                     (corpus-test)
+                                                     context
+                                                     (conj tests test))
+                               :else (throw (Exception. (str "Invalid form at test-checks stats:" (prn-str head))))))
+          (Corpus. context (conj tests test))))
+      (apply [:init forms [] nil []])))
 
 (defmacro this-ns "Total hack to get ns of this file at compile time" [] *ns*)
 
 (defn read-corpus
   "Read a list of symbol and return a Corpus map {:context {}, :tests []}"
-  [new-file]
-  (let [symbols (read-string (slurp new-file))]
+  [corpus-resource]
+  (let [symbols (edn/read-string (slurp corpus-resource))]
     (corpus (map #(binding [*ns* (this-ns)] (eval %)) symbols))))
+
+(comment
+  (def corpus-file "/Users/joachim/workspace/duckling/resources/languages/en/corpus/finance.clj")
+  (def symbols (edn/read-string (slurp corpus-file)))
+  )

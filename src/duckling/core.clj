@@ -16,6 +16,9 @@
 (defonce corpus-map (atom {}))
 (defonce classifiers-map (atom {}))
 
+(defn get-corpus [module]
+  (get @corpus-map :en$core))
+
 (defn default-context
   "Build a default context for testing. opt can be either :corpus or :now"
   [opt]
@@ -54,7 +57,12 @@
           :else nil)
     (if (not= 0 cmp-interval)
       cmp-interval ; one interval recovers the other
-      (compare (:log-prob a) (:log-prob b))))))
+      (do
+        ;; (println "comparing" a "and" b "\n=>" (compare (:log-prob a) (:log-prob b)))
+        ;; (compare (:log-prob a) (:log-prob b))
+        ;; (- (rand-int 3) 1)
+        (compare (rand-int 10) (rand-int 10))
+        )))))
 
 (defn- select-winners*
   [compare-fn resolve-fn already-selected candidates]
@@ -223,8 +231,8 @@
                                (remove #(clojure.string/starts-with? % "_"))
                                (map #(subs % 0 (- (count %) 4)))
                                vec)]
-                [(keyword dir) files])))
-       (into {})))
+                [(keyword (str dir "-files")) files])))
+       (into {:language lang})))
 
 (defn- gen-config-for-langs
   "Generates the full config for langs from directory structure."
@@ -234,30 +242,36 @@
               [(keyword (format "%s$core" lang)) (gen-config-for-lang lang)]))
        (into {})))
 
+(defn corpus-resource [language name]
+  (-> (format "languages/%s/corpus/%s.clj" language name)
+      io/resource))
+;; (corpus-resource "en" "finance")
+(defn rules-resource [language name]
+  (-> (format "languages/%s/rules/%s.clj" language name)
+      io/resource))
+
 (defn- read-rules
-  [lang new-file]
-  (-> (format "languages/%s/rules/%s.clj" lang new-file)
-      io/resource
+  [lang name]
+  (-> (rules-resource lang name)
       slurp
       read-string
       engine/rules))
 
 (defn- read-corpus
-  [lang new-file]
-  (-> (format "languages/%s/corpus/%s.clj" lang new-file)
-      io/resource
+  [language name]
+  (-> (corpus-resource language name)
       corpus/read-corpus))
 
 (defn- make-corpus
-  [lang corpus-files]
+  [{:keys [language corpus-files] :as language-config}]
   (->> corpus-files
-       (pmap (partial read-corpus lang))
+       (pmap (partial read-corpus language))
        (reduce (partial util/merge-according-to {:tests concat :context merge}))))
 
 (defn- make-rules
-  [lang rules-files]
+  [{:keys [language rules-files] :as language-config}]
   (->> rules-files
-       (pmap (partial read-rules lang))
+       (pmap (partial read-rules language))
        (apply concat)))
 
 (defn- get-dims-for-test
@@ -296,10 +310,10 @@
      (reset! rules-map {})
      (reset! corpus-map {})
      (let [data (->> config
-                     (pmap (fn [[config-key {corpus-files :corpus rules-files :rules}]]
+                     (pmap (fn [[config-key lang-config]]
                              (let [lang (-> config-key name (string/split #"\$") first)
-                                   corpus (make-corpus lang corpus-files)
-                                   rules (make-rules lang rules-files)
+                                   corpus (make-corpus lang-config)
+                                   rules (make-rules lang-config)
                                    c (learn/train-classifiers corpus rules learn/extract-route-features)]
                                [config-key {:corpus corpus :rules rules :classifier c}])))
                      (into {}))]
@@ -343,12 +357,14 @@
           line 0
           acc []]
      (if mod
-       (let [output (run-corpus (mod @corpus-map) mod)
+       (let [output (run-corpus (get-corpus mod) mod)
              failed (remove (comp (partial = 0) first) output)]
          (doseq [[[error-count text error-msg] i] (map vector failed (iterate inc line))]
-           (printf "%d FAIL \"%s\"\n    Expected %s\n" i text (first error-msg))
-           (doseq [got (second error-msg)]
-             (printf "    Got      %s\n" got)))
+           (printf "%d FAIL \"%s\"\n    %s\n" i text (str error-msg))
+           ;; (printf "%d FAIL \"%s\"\n    Expected %s\n" i text (first error-msg))
+           ;; (doseq [got (second error-msg)]
+           ;;   (printf "    Got      %s\n" got))
+           )
          (printf "%s: %d examples, %d failed.\n" mod (count output) (count failed))
          (recur more (+ line (count failed)) (concat acc (map (fn [[_ t _]] [mod t]) failed))))
        (defn c [n]
@@ -423,3 +439,24 @@
                  :targets targets}]
          (errorf e "duckling error err=%s" (pr-str err))
          []))))
+
+(comment
+
+  (load! {:languages ["en"]})
+  (run :en$core)
+
+  (def lang-config (gen-config-for-lang "en"))
+  (def corpus (make-corpus lang-config))
+  
+  (def corpus-files )
+  ;; no test fails if log-probs are disabled
+  ;; error (bug) when compare 
+
+  (defn get-tests-by-text [corpus text]
+    (filter (fn [{:keys [text]}]) (contains?  ())))
+  
+  (def context (:context (:en$core @corpus-map)))
+  (def corpus (get-corpus :en$core))
+  (keys corpus)
+  (filter #(= "3k" (:text %)) (:tests corpus))
+  )

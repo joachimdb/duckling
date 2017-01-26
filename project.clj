@@ -4,12 +4,13 @@
             :comments "see LICENSE"}
   :url "https://github.com/wit-ai/duckling"
   :plugins [[s3-wagon-private "1.1.2"]
-            [lein-midje "3.1.3"]]
+            [lein-midje "3.1.3"]
+            [cider/cider-nrepl "0.14.0"]]
   :repl-options {:init-ns duckling.core}
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/tools.nrepl "0.2.3"]
                  [org.clojure/tools.logging "0.2.6"]
-                 [clj-time "0.8.0"]
+                 [clj-time "0.11.0"]
                  [prismatic/plumbing "0.5.3"]]
   :deploy-repositories [["clojars" {:creds :gpg}]]
   :profiles {:dev {:dependencies [[org.clojure/tools.trace "0.7.6"]
