@@ -144,13 +144,13 @@
   (fn [_ token]
     (when-not (and
                (= :volume (:dim token))
-               (= value (-> token :value :value))
-               (= unit  (-> token :value :unit))
-               (= normalized (-> token :value :normalized)))
-      {:fim :volume
-       :value {:value value
-               :unit unit
-               :normalized normalized}})))
+               (= value (:value token))
+               (= unit  (:unit token))
+               ;; (= normalized (-> token :value :normalized))
+               )
+      [{:dim :volume
+        :value value
+        :unit unit} token])))
 
 
 (defn integer
@@ -174,6 +174,11 @@
   (update-in c [:text] conj text))
 (defn- add-check [^CorpusTest c check]
   (update-in c [:checks] conj check))
+
+(defrecord TestResult [text check-results])
+
+(defn failed? [^TestResult tr]
+  (not-any? nil? (:check-results tr)))
 
 (defrecord Corpus [context tests])
 

@@ -10,7 +10,8 @@
             [duckling.resource :as res]
             [duckling.time.api :as api]
             [duckling.time.obj :as time]
-            [duckling.util :as util]))
+            [duckling.util :as util])
+  (:import [duckling.corpus TestResult CorpusTest]))
 
 (defonce rules-map (atom {}))
 (defonce corpus-map (atom {}))
@@ -59,9 +60,9 @@
       cmp-interval ; one interval recovers the other
       (do
         ;; (println "comparing" a "and" b "\n=>" (compare (:log-prob a) (:log-prob b)))
-        ;; (compare (:log-prob a) (:log-prob b))
+        (compare (:log-prob a) (:log-prob b))
         ;; (- (rand-int 3) 1)
-        (compare (rand-int 10) (rand-int 10))
+        ;; (compare (rand-int 10) (rand-int 10))
         )))))
 
 (defn- select-winners*
@@ -126,7 +127,6 @@
                                           :end end
                                           :body text}))))]
     {:stash stash :winners winners}))
-
 
 ;--------------------------------------------------------------------------
 ; REPL utilities
@@ -331,22 +331,23 @@
 ; Corpus running
 ;--------------------------------------------------------------------------
 
+;; TODO: run-corpus now returns a sequence of {:text .. :check-results ...}
+;; - extract run-test and return test-result
+;; - implement tests for test results (e.g. failed?)
+;; - modify run so that it copes with the new return
+
+(defn run-test [module context ^CorpusTest test]
+  (for [text (:text test)]
+    (let [{:keys [stash winners]} (analyze text context module nil nil)
+          check (first (:checks test)) ; only one test is supported now
+          check-results (map (partial check context) winners)] ; return nil if OK, [expected actual] if not OK
+      (TestResult. text check-results))))
+
 (defn run-corpus
   "Run the corpus given in parameter for the given module.
   Returns a list of vectors [0|1 text error-msg]"
-  [{context :context, tests :tests} module]
-  (for [test tests
-        text (:text test)]
-    (try
-      (let [{:keys [stash winners]} (analyze text context module nil nil)
-            winner-count (count winners)
-            check (first (:checks test)) ; only one test is supported now
-            check-results (map (partial check context) winners)] ; return nil if OK, [expected actual] if not OK
-        (if (some #(or (nil? %) (false? %)) check-results)
-          [0 text nil]
-          [1 text [(ffirst check-results) (map second check-results)]]))
-      (catch Exception e
-        [1 text (.getMessage e)]))))
+  [module {context :context, tests :tests}]
+  (mapcat (partial run-test module context) tests))
 
 (defn run
   "Runs the corpus and prints the results to the terminal."
@@ -357,10 +358,10 @@
           line 0
           acc []]
      (if mod
-       (let [output (run-corpus (get-corpus mod) mod)
-             failed (remove (comp (partial = 0) first) output)]
-         (doseq [[[error-count text error-msg] i] (map vector failed (iterate inc line))]
-           (printf "%d FAIL \"%s\"\n    %s\n" i text (str error-msg))
+       (let [output (run-corpus mod (get-corpus mod))
+             failed (filter corpus/failed? output)]
+         (doseq [{:keys [text check-results]} (map vector failed (iterate inc line))]
+           (printf "FAIL \"%s\"    %d\n" (:text test) (count failed))
            ;; (printf "%d FAIL \"%s\"\n    Expected %s\n" i text (first error-msg))
            ;; (doseq [got (second error-msg)]
            ;;   (printf "    Got      %s\n" got))
@@ -443,20 +444,33 @@
 (comment
 
   (load! {:languages ["en"]})
+  
+  (def output (run-corpus :en$core (get-corpus :en$core)))
+  (def failed (filter corpus/failed? output))
+
+  ;; TODO:
+  ;; - standardize volume like time,
+  ;; - use value instead of value+unit+normalized
+
+  
   (run :en$core)
 
   (def lang-config (gen-config-for-lang "en"))
   (def corpus (make-corpus lang-config))
-  
-  (def corpus-files )
-  ;; no test fails if log-probs are disabled
-  ;; error (bug) when compare 
 
-  (defn get-tests-by-text [corpus text]
-    (filter (fn [{:keys [text]}]) (contains?  ())))
+  (def test (first (corpus/get-tests-by-text corpus "250 ml")))
+  (def a (analyze (first (:text test))
+                  (:context corpus)
+                  :en$core
+                  nil
+                  nil))
+  (def check (first (:checks test)))
+  (def check-results (map (partial check (:context corpus)) (:winners a)))
+  
   
   (def context (:context (:en$core @corpus-map)))
   (def corpus (get-corpus :en$core))
   (keys corpus)
   (filter #(= "3k" (:text %)) (:tests corpus))
+
   )
