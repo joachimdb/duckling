@@ -132,11 +132,13 @@
   (fn [_ token]
     (when-not (and
                (= :quantity (:dim token))
-               (= value (-> token :value :value))
-               (= unit (-> token :value :unit))
-               (= product (-> token :value :product)))
+               (= value (:value token))
+               (= unit (:unit token))
+               ;; (= product (-> token :value :product))
+               )
       [{:dim :quantity
-        :value {:value value :unt unit :product product}} token])))
+        :value value
+        :unit unit} token])))
 
 (defn volume
   "Create a volume condition"
