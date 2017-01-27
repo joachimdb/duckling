@@ -341,12 +341,13 @@
     (let [{:keys [stash winners]} (analyze text context module nil nil)
           check (first (:checks test)) ; only one test is supported now
           check-results (map (partial check context) winners)] ; return nil if OK, [expected actual] if not OK
-      (TestResult. text check-results))))
+      (TestResult. test text check-results))))
 
 (defn run-corpus
   "Run the corpus given in parameter for the given module.
   Returns a list of vectors [0|1 text error-msg]"
-  [module {context :context, tests :tests}]
+  [module {context :context, tests :tests resource :resource}]
+  (println "----->" resource)
   (mapcat (partial run-test module context) tests))
 
 (defn run
@@ -360,8 +361,8 @@
      (if mod
        (let [output (run-corpus mod (get-corpus mod))
              failed (filter corpus/failed? output)]
-         (doseq [{:keys [text check-results]} (map vector failed (iterate inc line))]
-           (printf "FAIL \"%s\"    %d\n" (:text test) (count failed))
+         (doseq [{:keys [test text check-results]} failed]
+           (printf "FAIL \"%s\"    %d    %s\n" text (count failed) (str (:resource test)))
            ;; (printf "%d FAIL \"%s\"\n    Expected %s\n" i text (first error-msg))
            ;; (doseq [got (second error-msg)]
            ;;   (printf "    Got      %s\n" got))
@@ -445,6 +446,8 @@
 
   (load! {:languages ["en"]})
   
+  (run :en$core)
+
   (def output (run-corpus :en$core (get-corpus :en$core)))
   (def failed (filter corpus/failed? output))
 
@@ -452,8 +455,6 @@
   ;; - standardize volume like time,
   ;; - use value instead of value+unit+normalized
 
-  
-  (run :en$core)
 
   (def lang-config (gen-config-for-lang "en"))
   (def corpus (make-corpus lang-config))

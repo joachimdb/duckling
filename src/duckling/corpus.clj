@@ -169,15 +169,15 @@
       [{:dim :number
         :integer true} token])))
 
-(defrecord CorpusTest [text checks])
-(defn- corpus-test []
-  (CorpusTest. #{} []))
+(defrecord CorpusTest [text checks resource])
+(defn- corpus-test [resource]
+  (CorpusTest. #{} [] resource))
 (defn- add-text [^CorpusTest c text]
   (update-in c [:text] conj text))
 (defn- add-check [^CorpusTest c check]
   (update-in c [:checks] conj check))
 
-(defrecord TestResult [text check-results])
+(defrecord TestResult [test text check-results])
 
 (defn failed? [^TestResult tr]
   (not-any? nil? (:check-results tr)))
@@ -187,26 +187,15 @@
 (defn get-tests-by-text [corpus text]
     (filter (fn [test] (contains? (:text test) text)) (:tests corpus)))
 
-(comment
-
-  (def t [{:text []}]) ;; init
-  (def t (assoc-in t [(dec (count t)) :text (count (:text (peek t)))] (count (:text (first t)))))
-
-  (update-in ())
-
-  (update-in [0 1 2] [0] #(+ 5 %))
-  (update-in [0 1 2] [1] #(+ 5 %))
-  )
-
 (defn corpus
   "Parse corpus" ;; TODO should be able to load several files, like rules
-  [forms]
+  [resource forms]
   (-> (fn [state [head & more :as forms] test context tests]
         ;; (println state head test (count tests))
         (if head
           (case state
             :init (cond (map? head) (recur :test-strings more
-                                           (corpus-test)
+                                           (corpus-test resource)
                                            head
                                            tests)
                         :else (throw (Exception. (str "Invalid form at init state. A map is expected for context:" (prn-str head)))))
@@ -226,7 +215,7 @@
                                                  context
                                                  tests)
                                (string? head) (recur :test-strings forms
-                                                     (corpus-test)
+                                                     (corpus-test resource)
                                                      context
                                                      (conj tests test))
                                :else (throw (Exception. (str "Invalid form at test-checks stats:" (prn-str head))))))
@@ -239,7 +228,7 @@
   "Read a list of symbol and return a Corpus map {:context {}, :tests []}"
   [corpus-resource]
   (let [symbols (edn/read-string (slurp corpus-resource))]
-    (corpus (map #(binding [*ns* (this-ns)] (eval %)) symbols))))
+    (corpus corpus-resource (map #(binding [*ns* (this-ns)] (eval %)) symbols))))
 
 (comment
   (def corpus-file "/Users/joachim/workspace/duckling/resources/languages/en/corpus/finance.clj")
