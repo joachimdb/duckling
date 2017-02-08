@@ -93,8 +93,8 @@
      :pattern (map pattern-fn pattern-vec)
      :production (binding [*ns* duckling-helper-ns]
                    (eval `(fn ~(vec (map #(symbol (str "%" %))
-                                        (range 1 (inc (count pattern-vec)))))
-                                        ~production)))}))
+                                         (range 1 (inc (count pattern-vec)))))
+                            ~production)))}))
 
 (defn rules
   "Parses a set of rules and 'add' them into 'the-rules'.
@@ -150,20 +150,20 @@
 (defn- match
   "Tries to match 'pattern' in the 'stash'.
   Return a seq of routes. A route is a seq of tokens."
-  [pattern stash]
-  (letfn [(match-recur [pattern first-pattern? stash position route results]
-            (if (empty? pattern)
+  [patterns stash]
+  (letfn [(match-recur [patterns first-pattern? stash position route results]
+            (if (empty? patterns)
               (cons route results) ;; add "finished" route to results and return
               (try
                 (apply concat
-                  (for [token ((first pattern) stash position)
-                        :when (or first-pattern? (adjacent? position token stash))]
-                    (match-recur (rest pattern)
-                      false
-                      stash
-                      (:end token)
-                      (conj route token)
-                      results)))
+                       (for [token ((first patterns) stash position)
+                             :when (or first-pattern? (adjacent? position token stash))]
+                         (match-recur (rest patterns)
+                                      false
+                                      stash
+                                      (:end token)
+                                      (conj route token)
+                                      results)))
                 (catch Exception e
                   ;; (.printStackTrace e) - probably use logging/debug and turn logging output
                   ;; (prn stash)
@@ -172,7 +172,7 @@
                                           (with-out-str (pr stash)))
                                   {:exception e}))
                   ))))]
-    (match-recur pattern true stash 0 [] [])))
+    (match-recur patterns true stash 0 [] [])))
 
 (defn- pass-once
   "Make one pass of each rule on the stash.

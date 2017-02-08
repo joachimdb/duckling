@@ -10,12 +10,12 @@
 
 (defmacro fn& [grain args & forms]
   (let [[t ctx] args]
-  `(with-meta
-     (fn ~args
-       (assert (and (:start ~t) (:grain ~t)) (format "Invalid t argument provided to predicate: %s" ~t))
-       (assert (:max ~ctx) "Invalid context, missing :max")
-       ~@forms)
-     {:grain ~grain})))
+    `(with-meta
+       (fn ~args
+         (assert (and (:start ~t) (:grain ~t)) (format "Invalid t argument provided to predicate: %s" ~t))
+         (assert (:max ~ctx) "Invalid context, missing :max")
+         ~@forms)
+       {:grain ~grain})))
 
 
 ;; The clojure.core/mapcat breaks the lazyness of its arguments
@@ -33,25 +33,6 @@
 
 (def safe-max 183) ; 366 (days in a leap year) if we take safe-max forward and backward
 (def safe-max-interval 12)
-
-;; Debug utlity
-
-(defn show [f]
-  [(take 5 (first (f (t/now) {:reference-time (t/now)})))
-   (take 5 (second (f (t/now) {:reference-time (t/now)})))])
-
-; Config (could be moved to config file)
-
-; Defines the resulting grain after a shift. For instance, for 'in two years'
-; the result grain will be :month
-
-(def grain-after-shift {:year :month
-                        :month :day
-                        :week :day
-                        :day :hour
-                        :hour :minute
-                        :minute :second
-                        :second :second})
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; First-order Predicates
@@ -119,12 +100,34 @@
 
 (defn hour [h twelve-hour-clock?]
   (fn& :hour [t _] (let [step (if (and twelve-hour-clock? (<= h 12))
-                          12
-                          24)
-                   diff (mod (- h (t/hour t)) step)
-                   anchor (t/plus (t/round t :hour) :hour diff)]
-               [(iterate #(t/plus % :hour step) anchor)
-                (next (iterate #(t/minus % :hour step) anchor))])))
+                                12
+                                24)
+                         diff (mod (- h (t/hour t)) step)
+                         anchor (t/plus (t/round t :hour) :hour diff)]
+                     [(iterate #(t/plus % :hour step) anchor)
+                      (next (iterate #(t/minus % :hour step) anchor))])))
+
+
+(comment
+
+  (def t {:start (clj-time.coerce/from-string "2015-6-18") :grain :day})
+
+  (def h (hour 16 false))
+  (take 5 (first   (h t {:max :not-used})))
+  (take 5 (second (h t {:max :not-used})))
+  
+  (def m (month 7))
+  (take 5 (first (m t {:max :foo})))
+  (take 5 (second (m t {:max :foo})))
+
+  (def y (year 2014))
+  (y t {:max :foo})
+
+  
+
+  )
+
+
 
 (defn minute [m]
   (fn& :minute [t _] (let [diff (mod (- m (t/minute t)) 60)
@@ -150,6 +153,20 @@
 
 ;;;;;;;;;;;;;;;;;;;;;
 ;; Second order functions
+
+; Config (could be moved to config file)
+
+; Defines the resulting grain after a shift. For instance, for 'in two years'
+; the result grain will be :month
+
+(def grain-after-shift {:year :month
+                        :month :day
+                        :week :day
+                        :day :hour
+                        :hour :minute
+                        :minute :second
+                        :second :second})
+
 
 (declare seq-map)
 

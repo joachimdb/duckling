@@ -338,18 +338,19 @@
 
 (defn run-test [module context ^CorpusTest test]
   (for [text (:text test)]
-    (let [{:keys [stash winners]} (analyze text context module nil nil)
-          check (first (:checks test)) ; only one test is supported now
-          check-results (map (partial check context) winners)] ; return nil if OK, [expected actual] if not OK
-      (TestResult. test text check-results))))
+    (try (let [{:keys [stash winners]} (analyze text context module nil nil)
+               check (first (:checks test)) ; only one test is supported now
+               check-results (doall (map (partial check context) winners))] ; return nil if OK, [expected actual] if not OK
+           (TestResult. test text check-results nil))
+         (catch Exception e
+           (TestResult. test text nil e )))))
 
 (defn run-corpus
   "Run the corpus given in parameter for the given module.
   Returns a list of vectors [0|1 text error-msg]"
   [module {context :context, tests :tests resource :resource}]
-  (println "----->" resource)
   (mapcat (partial run-test module context) tests))
-
+;; (def mod :en$core)
 (defn run
   "Runs the corpus and prints the results to the terminal."
   ([]
@@ -361,8 +362,10 @@
      (if mod
        (let [output (run-corpus mod (get-corpus mod))
              failed (filter corpus/failed? output)]
-         (doseq [{:keys [test text check-results]} failed]
-           (printf "FAIL \"%s\"    %d    %s\n" text (count failed) (str (:resource test)))
+         (doseq [{:keys [test text check-results exception?]} failed]
+           (if exception?
+             (printf "EXCEPTION \"%s\"    %s    %s\n" text (.getMessage exception?) (str (:resource test)))
+             (printf "FAIL \"%s\"    %d    %s\n" text (count failed) (str (:resource test))))
            ;; (printf "%d FAIL \"%s\"\n    Expected %s\n" i text (first error-msg))
            ;; (doseq [got (second error-msg)]
            ;;   (printf "    Got      %s\n" got))

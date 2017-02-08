@@ -2,33 +2,130 @@
   (:use     [clojure.tools.logging]
             [clojure.edn :as edn]
             [plumbing.core :except [millis]])
-  (:require [duckling.time.obj :as time]
-            [duckling.util :as util]))
+  (:require [aima-clj.logic.algorithms.unify :refer :all]
+            [aima-clj.logic.algorithms.unify.extensions]
+            [duckling.time.obj :as time]
+            [duckling.util :as util]
+            [clojure.core.match :refer [match]]))
 ;; (remove-ns 'duckling.corpus)
 ; Checker functions return *nil* when OK, or [expected actual] when not OK
+
+;; (def args [2013 2 18 :day-of-week 1 :day 18 :month 2])
+;; (split-with integer? args)
+;; => [(2013 2 18) (:day-of-week 1 :day 18 :month 2)]
 
 (defn- vec->date-and-map
   "Turns a vector of args into a date and a map of extra fields"
   [args]
   (let [[date-fields other-keys-and-values] (split-with integer? args)
         token-fields (into {} (map vec (partition 2 other-keys-and-values)))
-        date (-> (apply time/t -2 date-fields)
-                 (?> (:grain token-fields) (assoc :grain (:grain token-fields)))
-                 (?> (:timezone token-fields) (assoc :timezone (:timezone token-fields))))]
+        timezone (get token-fields :timezone -2)
+        date (-> (apply time/t timezone date-fields)
+                 (?> (:grain token-fields) (assoc :grain (:grain token-fields))))]
     [date token-fields]))
+
+(defn- pattern->date-and-map
+  "Turns a pattern map into a date and a map of extra fields"
+  [{:keys [timezone year month day hour minute second grain direction precision]
+    :as pattern
+    :or {timezone -2}}]
+  (let [date (-> (apply time/t timezone (take-while identity (util/select-values pattern [:year :month :day :hour :minute :second])))
+                 (?> grain (assoc :grain grain)))
+        token-fields (dissoc pattern :year :month :day :hour :minute :second)]
+    [date token-fields]))
+
+(defn tkn [p]
+  (let [ks (keys p)]
+    (fn [context token]
+      (let [v (select-keys token ks)]
+        (when-not (unify p v)
+          (println "pttern: " p)
+          (println "source: " v)
+          (when (= :dim p) (:dim v)
+                (println "pttern: " p)
+                (println "source: " v))
+          [p v])))))
+
+(defn datetime*
+  "Creates a datetime checker function to check if the token is valid"
+  [{:keys [timezone year month day hour minute second grain direction precision] :as pattern}]
+  (let [[date token-fields] (pattern->date-and-map pattern)
+        p (assoc (select-keys token-fields [:direction :precision])
+                 :dim :time
+                 :value date)]
+    (fn [context token]
+      (let [v (select-keys token [:dim :value :direction :precision])]
+        (when-not (unify p v)
+          [p v])))))
 
 (defn datetime
   "Creates a datetime checker function to check if the token is valid"
   [& args]
-  (let [[date token-fields] (vec->date-and-map args)]
-    (fn [context token]
-      (when-not
-          (and
-           (= :time (:dim token))
-           (util/hash-match (select-keys token-fields [:direction :precision])
-                            token)
-           (= (-> token :value) date))
-        [date (:value token)]))))
+  (if (and (= 1 (count args))
+           (map? (first args)))
+    (datetime* first args)
+    (let [[date token-fields] (vec->date-and-map args)
+          p (assoc (select-keys token-fields [:direction :precision])
+                   :dim :time
+                   :value date)]
+      (fn [context token]
+        (let [v (select-keys token [:dim :value :direction :precision])]
+          (when-not (unify (:value token) date)
+            [p v]))))))
+
+(comment
+
+  ;; pttern:  {:dim :time, :value {:start #object[org.joda.time.DateTime 0x43079115 2013-02-12T16:00:00.000+01:00], :grain :hour}}
+  ;; source:  {:dim :time, :value {:start #object[org.joda.time.DateTime 0x3a471d3a 2013-02-12T16:00:00.000-02:00], :grain :hour, :timezone CET}}
+
+  ;; failure
+  ;; from test "4pm CET"
+  ;; due to rule
+
+  ;; "<time> timezone"
+  ;; [(dim :time) (dim :timezone)]
+  ;; (set-timezone %1 (:value %2))
+
+  ;; (see duckling.time.prod/set-timezone)
+  
+  ;; {:dim :time,
+  ;;  :value {:start #object[org.joda.time.DateTime 0x3a2327b7 2013-02-12T04:30:00.000-02:00], :grain :second}}
+  
+  
+  (datetime* {:timezone -2 :year 2013 :month 2 :day 12 :hour 4 :minute 30 :second 00})
+  (unify)
+
+  (def date (first (vec->date-and-map [2013 2 12 4 30 00])))
+  
+  
+  (def check (datetime 2013 2 12 4 30 00))
+  (def token {:dim :time,
+              :value
+              {:start (clj-time.coerce/from-string "2013-02-12T04:30:00.000-02:00"),
+               ;; :timezone -2
+               :grain :second},
+              :body "right now"})
+  (def r (check nil token))
+  (def p (first r))
+  (def v (second r))
+  (unify p v)
+  (match p v true :else false)
+  (def date (:value p))
+  (match (:value token) p true :else false)
+  
+  (match v p true :else false)
+  (def p (:value p))
+  (def v (:value v))
+  (match p v true :else false)
+  
+  (match (:value p) (:value v) true :else false)
+  (= (first date) (first r))
+  (def date (:start (:value (first r))))
+  (def token (:start (:value (second r))))
+  (= date token)
+  (clj-time.core/equal? date token)
+  (match date token true :else false)
+  )
 
 (defn datetime-interval
   "Creates a datetime interval checker function"
@@ -177,10 +274,11 @@
 (defn- add-check [^CorpusTest c check]
   (update-in c [:checks] conj check))
 
-(defrecord TestResult [test text check-results])
+(defrecord TestResult [test text check-results exception?])
 
 (defn failed? [^TestResult tr]
-  (not-any? nil? (:check-results tr)))
+  (or (:exception? tr)
+      (not-any? nil? (:check-results tr))))
 
 (defrecord Corpus [context tests])
 

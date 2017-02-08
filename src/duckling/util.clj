@@ -14,6 +14,9 @@
            [java.io StringWriter]
            [org.joda.time DateTimeZone DateTime]))
 
+(defn select-values [map ks]
+  (reduce #(conj %1 (map %2)) [] ks))
+
 (defn hash-match
   "Matching hashmap over hashmap. Keys can be functions.
   WARNING THIS IS NOT RECURSIVE FOR THE MOMENT"
