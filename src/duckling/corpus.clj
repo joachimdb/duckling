@@ -5,8 +5,7 @@
   (:require [aima-clj.logic.algorithms.unify :refer :all]
             [aima-clj.logic.algorithms.unify.extensions]
             [duckling.time.obj :as time]
-            [duckling.util :as util]
-            [clojure.core.match :refer [match]]))
+            [duckling.util :as util]))
 ;; (remove-ns 'duckling.corpus)
 ; Checker functions return *nil* when OK, or [expected actual] when not OK
 

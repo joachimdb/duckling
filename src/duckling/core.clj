@@ -32,10 +32,18 @@
   (when id
     (get @classifiers-map (keyword id))))
 
-(defn- get-rules
-  [id]
-  (when id
-    (get @rules-map (keyword id))))
+(defn get-rules
+  [module]
+  (when module
+    (get @rules-map (keyword module))))
+
+(defn get-rule-by-name
+  [module name]
+  (first (filter #(= (:name %) name)
+                           (get-rules :en$core))))
+
+(def rule (first (filter #(= (:name %) "time-of-day (latent)")
+                           (get-rules :en$core))))
 
 (defn- compare-tokens
   "Compares two candidate tokens a and b for runtime selection.

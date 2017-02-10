@@ -10,10 +10,16 @@
             [duckling.time.prod]
             [duckling.time.api :as time]
             [duckling.util :as util]))
+;; (remove-ns 'duckling.engine)
 
-;;
-;; Lookup and basic matching functions, used by patterns in rules
-;;
+;; Rule protocol
+;; -------------
+
+(defprotocol Rule
+  (match [this stash]))
+
+;; Lexical rules are matched against the input string
+;; --------------------------------------------------
 
 (defn- re-pos
   "Finds regex matches in s, with their position and groups.
@@ -29,48 +35,41 @@
                     (vec (map #(.group m (int %)) (range 1 (inc (.groupCount m)))))]))
       res)))
 
-(defn- lookup-re
-  "Lookup regex in s, starting at a given position, and builds one token per found match"
-  [regex [{s :text}] position]
-  {:pre [regex s]}
-  (try
-    (let [matches (for [[pos word groups] (re-pos regex (subs s position))]
-                    (do
-                      (when (clojure.string/blank? word)
-                        (throw (ex-info "Zero-length or blank captures forbidden"
-                                        {:regex regex :s s})))
-                      {:pos (+ position pos)
-                       :end (+ position pos (count word))
-                       :text word
-                       :groups groups}))]
-      (->> matches
-           (filter #(util/separated-substring? s (:pos %) (:end %)))))
-    (catch Exception e
-      (throw (ex-info "@lookup-re" {:exception e :s s :regex regex})))))
+(defn- lookup-re*
+  "Lookup regex in string s and return one token per found match"
+  [regex s]
+  (let [matches (for [[pos word groups] (re-pos regex s)]
+                  (do
+                    (when (clojure.string/blank? word)
+                      (throw (ex-info "Zero-length or blank captures forbidden"
+                                      {:regex regex :s s})))
+                    {:pos pos
+                     :end (+ pos (count word))
+                     :text word
+                     :groups groups}))]
+    (->> matches
+         (filter #(util/separated-substring? s (:pos %) (:end %))))))
+
+(defrecord LexicalRule [name pattern production]
+  Rule
+  (match [this [{s :text}]] (map vector (lookup-re* pattern s))))
+
+;; Constructions rules are matched against tokens
+;; ----------------------------------------------
 
 (defn- lookup-token
   "Finds tokens satisfying constraints"
   [pattern-filter stash]
   {:pre [pattern-filter]}
-  ;; FIXME brute force approach that could be improved!
-  ;; note that position is ignored at this point, adjacent? will need to do the job
-  ;; this fn does not do much and could be avoided... but might be more complex later
   (try
     (filter pattern-filter stash)
     (catch Exception e
       (throw (Exception. "@Look-up token")))))
 
-;;
-;; Rules parsing
-;;
 (defn pattern-fn
   "Makes a pattern function from the pattern slice (regex...)"
   [pattern]
   (cond
-    (instance? java.util.regex.Pattern pattern)
-    (fn [stash position]
-      (lookup-re pattern stash position))
-
     (map? pattern)
     (fn [stash position]
       (lookup-token #(util/hash-match pattern %) stash))
@@ -78,34 +77,9 @@
     (fn? pattern)
     (fn [stash position]
       (lookup-token pattern stash))
-
     :else (throw
             (Exception. (str "Unable to parse pattern: " (prn-str pattern) " class:" (class pattern))))))
 
-(defn build-rule
-  "Builds a new rule"
-  [name pattern production]
-  (if (not (string? name)) (throw (Exception. "Can't accept rule without name.")))
-  (let [duckling-helper-ns (the-ns 'duckling.time.prod) ; could split time.patterns and time.prod helpers
-        pattern (binding [*ns* duckling-helper-ns] (eval pattern))
-        pattern-vec (if (vector? pattern) pattern [pattern])]
-    {:name name
-     :pattern (map pattern-fn pattern-vec)
-     :production (binding [*ns* duckling-helper-ns]
-                   (eval `(fn ~(vec (map #(symbol (str "%" %))
-                                         (range 1 (inc (count pattern-vec)))))
-                            ~production)))}))
-
-(defn rules
-  "Parses a set of rules and 'add' them into 'the-rules'.
-  Can be called several times, since rules might spread into several files."
-  [forms]
-  (->> (partition 3 forms)
-       (mapv (partial apply build-rule))))
-
-;;
-;; Runtime parsing (core algorithm)
-;;
 (defn- adjacent?
   "True if token is adjacent following position (like, there are just spaces
    from position to the beginning of the token)"
@@ -119,11 +93,77 @@
     (catch Exception e
       (throw (Exception. (str "@adjacent? " e))))))
 
+(defn- match*
+  "Tries to match 'pattern' in the 'stash'.
+  Return a seq of routes. A route is a seq of tokens."
+  [patterns stash]
+  (letfn [(match-recur [patterns first-pattern? stash position route results]
+            (if (empty? patterns)
+              (cons route results) ;; add "finished" route to results and return
+              (try
+                (apply concat
+                       (for [token ((first patterns) stash position)
+                             :when (or first-pattern? (adjacent? position token stash))]
+                         (match-recur (rest patterns)
+                                      false
+                                      stash
+                                      (:end token)
+                                      (conj route token)
+                                      results)))
+                (catch Exception e
+                  ;; (.printStackTrace e) - probably use logging/debug and turn logging output
+                  ;; (prn stash)
+                  (throw (ex-info (format "Exception @match stack=%s stash=%s"
+                                          (with-out-str (clojure.stacktrace/print-stack-trace e))
+                                          (with-out-str (pr stash)))
+                                  {:exception e}))))))]
+    (match-recur patterns true stash 0 [] [])))
+
+(defrecord Cxn [name pattern production]
+  Rule
+  (match [this stash]
+    (match* pattern stash)))
+
+
+;;; Rule parsing
+;;; ------------
+
+(defn build-rule
+  "Builds a new rule"
+  [name pattern production]
+  (if (not (string? name)) (throw (Exception. "Can't accept rule without name.")))
+  (let [duckling-helper-ns (the-ns 'duckling.time.prod) ; could split time.patterns and time.prod helpers
+        pattern (binding [*ns* duckling-helper-ns] (eval pattern))
+        pattern-vec (if (vector? pattern) pattern [pattern])
+        production (binding [*ns* duckling-helper-ns]
+                     (eval `(fn ~(vec (map #(symbol (str "%" %))
+                                           (range 1 (inc (count pattern-vec)))))
+                              ~production)))]
+    (if (instance? java.util.regex.Pattern pattern)
+      (LexicalRule. name pattern production)
+      (Cxn. name
+            (map pattern-fn pattern-vec)
+            production))))
+
+(defn rules
+  "Parses a set of rules and 'add' them into 'the-rules'.
+  Can be called several times, since rules might spread into several files."
+  [forms]
+  (->> (partition 3 forms)
+       (mapv (partial apply build-rule))))
+
+;;
+;; Runtime parsing (core algorithm)
+;;
+
+
 (defn- produce
   "Produce a new token when a rule has matched.
   The 'route' is a seq of tokens, it is provided by the 'match' function"
   [rule route sentence]
   {:pre [rule route sentence]}
+  ;; (println "-------------------------")
+  ;; (println rule route sentence)
   (let [pos (:pos (first route))
         end (:end (last route))]
     (try
@@ -147,33 +187,6 @@
   {:pre [stash rule route]}
   (every? #(or (not= rule (:rule %)) (not= route (:route %))) stash))
 
-(defn- match
-  "Tries to match 'pattern' in the 'stash'.
-  Return a seq of routes. A route is a seq of tokens."
-  [patterns stash]
-  (letfn [(match-recur [patterns first-pattern? stash position route results]
-            (if (empty? patterns)
-              (cons route results) ;; add "finished" route to results and return
-              (try
-                (apply concat
-                       (for [token ((first patterns) stash position)
-                             :when (or first-pattern? (adjacent? position token stash))]
-                         (match-recur (rest patterns)
-                                      false
-                                      stash
-                                      (:end token)
-                                      (conj route token)
-                                      results)))
-                (catch Exception e
-                  ;; (.printStackTrace e) - probably use logging/debug and turn logging output
-                  ;; (prn stash)
-                  (throw (ex-info (format "Exception @match stack=%s stash=%s"
-                                          (with-out-str (clojure.stacktrace/print-stack-trace e))
-                                          (with-out-str (pr stash)))
-                                  {:exception e}))
-                  ))))]
-    (match-recur patterns true stash 0 [] [])))
-
 (defn- pass-once
   "Make one pass of each rule on the stash.
   Returns a new stash augmented with the seq of produced tokens."
@@ -182,7 +195,7 @@
     (apply concat
       (for [rule rules]
         (try
-          (->> (match (:pattern rule) stash) ; get the routes that match this rule
+          (->> (match rule stash) ; get the routes that match this rule
                (filter (partial never-produced? stash rule)) ; remove what we already have
                (map (fn [route] (produce rule route sentence)))) ; produce
           (catch Exception e

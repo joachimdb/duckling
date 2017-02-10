@@ -50,11 +50,13 @@
   (cond (:start timezone) (.getZone ^DateTime (:start timezone))
         (instance? DateTime timezone) (.getZone ^DateTime timezone)
         (integer? timezone) (time/time-zone-for-offset timezone)
-        :else (throw (ex-info "Invalid timezone" {:tz timezone}))))
+        (string? timezone) (DateTimeZone/forID timezone)))
 
 (defn t
   "Builds a time object with timezone, start and grain.
   Timezone is actually extracted from the provided instant."
+  ([m]   
+   (apply t (remove nil? [(:grain m) (:timezone m) (:year m) (get m :month) (get m :day) (get m :hour) (get m :minute) (get m :second)])))
   ([timezone year]
    (t :year timezone year 1 1 0 0 0))
   ([timezone year month]

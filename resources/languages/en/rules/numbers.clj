@@ -4,8 +4,12 @@
   [(dim :number :grain #(> (:grain %) 1)) (dim :number)] ; grain 1 are taken care of by specific rule
   (compose-numbers %1 %2)
 
+  "and"
+  #"(?i)and"
+  {:text "and"}
+ 
   "intersect (with and)"
-  [(dim :number :grain #(> (:grain %) 1)) #"(?i)and" (dim :number)] ; grain 1 are taken care of by specific rule
+  [(dim :number :grain #(> (:grain %) 1)) {:text "and"} (dim :number)] ; grain 1 are taken care of by specific rule
   (compose-numbers %1 %3)
 
  ;;
@@ -136,8 +140,12 @@
   {:dim :number
    :value (Double/parseDouble (first (:groups %1)))}
 
+ "dot or point"
+ #"(?i)dot|point"
+  {:dim :decimal-separator}
+ 
   "number dot number"
-  [(dim :number #(not (:number-prefixed %))) #"(?i)dot|point" (dim :number #(not (:number-suffixed %)))]
+  [(dim :number #(not (:number-prefixed %))) {:dim :decimal-separator} (dim :number #(not (:number-suffixed %)))]
   {:dim :number
    :value (+ (* 0.1 (:value %3)) (:value %1))}
 
@@ -150,9 +158,13 @@
             (clojure.string/replace #"," "")
             Double/parseDouble)}
 
+  "minus prefix with -, negative or minus"
+  #"(?i)-|minus\s?|negative\s?"
+  {:dim :minus-prefix}
+ 
   ;; negative number
   "numbers prefix with -, negative or minus"
-  [#"(?i)-|minus\s?|negative\s?" (dim :number #(not (:number-prefixed %)))]
+  [{:dim :minus-prefix} (dim :number #(not (:number-prefixed %)))]
   (let [multiplier -1
         value      (* (:value %2) multiplier)
         int?       (zero? (mod value 1)) ; often true, but we could have 1.1111K
@@ -163,13 +175,17 @@
 
 
   ;; suffixes
-
+  "numbers suffixes (K, M, G)"
+  #"(?i)([kmg])(?=[\W\$€]|$)"
+  {:dim :number-suffix
+   :multiplier (get {"k" 1000 "m" 1000000 "g" 1000000000}
+                    (-> %1 :groups first clojure.string/lower-case))}
+ 
   ; note that we check for a space-like char after the M, K or G
   ; to avoid matching 3 Mandarins
-  "numbers suffixes (K, M, G)"
-  [(dim :number #(not (:number-suffixed %))) #"(?i)([kmg])(?=[\W\$€]|$)"]
-  (let [multiplier (get {"k" 1000 "m" 1000000 "g" 1000000000}
-                        (-> %2 :groups first clojure.string/lower-case))
+  "<number> + <number suffix>"
+  [(dim :number #(not (:number-suffixed %))) {:dim :number-suffix}]
+  (let [multiplier (:multiplier %2)
         value      (* (:value %1) multiplier)
         int?       (zero? (mod value 1)) ; often true, but we could have 1.1111K
         value      (if int? (long value) value)] ; cleaner if we have the right type

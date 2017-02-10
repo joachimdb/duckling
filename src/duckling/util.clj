@@ -39,6 +39,7 @@
     (not= (get-char-class (str char1))
           (get-char-class (str char2)))))
 
+;; NOTE: the below function is not fit for detecting suffixes
 (defn separated-substring?
   "Since we match regexes without whitespace delimitator, we have to check
    the reasonability of the match to actually be a word
